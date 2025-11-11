@@ -1,17 +1,20 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, Dispatch, SetStateAction } from 'react';
 import { ChannelInputForm } from './ChannelInputForm';
 import { ResultsDisplay } from './ResultsDisplay';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultsToolbar } from './ResultsToolbar';
 import { convertIdentifierToChannelId, getChannelVideos, getVideoComments } from '../services/youtubeService';
-import { summarizeComments } from '../services/geminiService';
-import { AnalyzedVideo } from '../types';
+import { summarizeComments, analyzeTitleTrends } from '../services/geminiService';
+import { AnalyzedVideo, TitleTrendAnalysis } from '../types';
+import { TitleTrendAnalysisDisplay } from './TitleTrendAnalysisDisplay';
 
 interface VideoAnalysisTabProps {
-    apiKey: string;
-    geminiApiKey: string;
+    youtubeApiKeys: string[];
+    currentYoutubeKeyIndex: number;
+    setCurrentYoutubeKeyIndex: Dispatch<SetStateAction<number>>;
+    keysReady: boolean;
     results: AnalyzedVideo[];
-    setResults: (results: AnalyzedVideo[]) => void;
+    setResults: Dispatch<SetStateAction<AnalyzedVideo[]>>;
 }
 
 const escapeCsvField = (field: any): string => {
@@ -22,7 +25,14 @@ const escapeCsvField = (field: any): string => {
     return stringField;
 };
 
-export const VideoAnalysisTab: React.FC<VideoAnalysisTabProps> = ({ apiKey, geminiApiKey, results: originalResults, setResults: setOriginalResults }) => {
+export const VideoAnalysisTab: React.FC<VideoAnalysisTabProps> = ({ 
+    youtubeApiKeys, 
+    currentYoutubeKeyIndex, 
+    setCurrentYoutubeKeyIndex, 
+    keysReady,
+    results: originalResults, 
+    setResults: setOriginalResults 
+}) => {
     const [channelsInput, setChannelsInput] = useState<string>(`https://www.youtube.com/@MrBeast
 https://www.youtube.com/channel/UC295-Dw_tDNtZXFeAPAW6Aw
 @mkbhd
@@ -31,12 +41,10 @@ https://www.youtube.com/@TheSleepyExplorer-r6o`);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     
-    // State for filtering and sorting
     const [sortOrder, setSortOrder] = useState<'ratio' | 'views'>('ratio');
     const [minViews, setMinViews] = useState<string>('');
+    const [trendAnalysis, setTrendAnalysis] = useState<TitleTrendAnalysis | null>(null);
     
-    const apiKeysReady = !!apiKey && !!geminiApiKey;
-
     const parseChannelInput = (input: string): string[] => {
         return input.split(/[\n,]+/)
             .map(line => line.trim())
@@ -52,11 +60,15 @@ https://www.youtube.com/@TheSleepyExplorer-r6o`);
     };
 
     const handleAnalyze = useCallback(async () => {
-        if (!apiKeysReady) return;
+        if (!keysReady) {
+            setError("Chưa sẵn sàng để phân tích. Vui lòng đợi API keys được tải.");
+            return;
+        }
 
         setIsLoading(true);
         setError(null);
         setOriginalResults([]);
+        setTrendAnalysis(null);
 
         const channelIdentifiers = parseChannelInput(channelsInput);
         
@@ -66,53 +78,100 @@ https://www.youtube.com/@TheSleepyExplorer-r6o`);
             return;
         }
 
-        try {
-            const allTopVideos: AnalyzedVideo[] = [];
+        let lastError: Error | null = null;
+        let success = false;
+        
+        const keyIndexesToTry = Array.from(
+            { length: youtubeApiKeys.length },
+            (_, i) => (currentYoutubeKeyIndex + i) % youtubeApiKeys.length
+        );
 
-            for (const identifier of channelIdentifiers) {
-                const channelInfo = await convertIdentifierToChannelId(identifier, apiKey);
-                if (!channelInfo) {
-                    console.warn(`Không thể tìm thấy kênh cho: ${identifier}`);
-                    continue;
+        for (const keyIndex of keyIndexesToTry) {
+            const currentApiKey = youtubeApiKeys[keyIndex];
+            setCurrentYoutubeKeyIndex(keyIndex);
+
+            try {
+                const allTopVideos: AnalyzedVideo[] = [];
+                const allTitlesForTrending: string[] = [];
+
+                for (const identifier of channelIdentifiers) {
+                    const channelInfo = await convertIdentifierToChannelId(identifier, currentApiKey);
+                    if (!channelInfo) {
+                        console.warn(`Không thể tìm thấy kênh cho: ${identifier}`);
+                        continue;
+                    }
+                    
+                    const videos = await getChannelVideos(channelInfo.channelId, timeframe, currentApiKey);
+                    
+                    if (videos.length === 0) continue;
+
+                    // New logic for trend analysis: collect top 10 titles by views
+                    const top10ByViews = [...videos]
+                        .sort((a, b) => b.viewCount - a.viewCount)
+                        .slice(0, 10);
+                    top10ByViews.forEach(v => allTitlesForTrending.push(v.title));
+
+                    const totalViews = videos.reduce((sum, video) => sum + video.viewCount, 0);
+                    const averageViews = videos.length > 0 ? totalViews / videos.length : 0;
+
+                    const potentialVideos = videos
+                        .filter(video => video.viewCount > averageViews * 1.5)
+                        .sort((a, b) => b.viewCount - a.viewCount);
+                    
+                    const top5Videos = potentialVideos.slice(0, 5);
+
+                    for (const video of top5Videos) {
+                        const comments = await getVideoComments(video.id, currentApiKey);
+                        const commentsSummary = await summarizeComments(comments);
+                        
+                        allTopVideos.push({
+                            ...video,
+                            channelId: channelInfo.channelId,
+                            channelName: channelInfo.channelName,
+                            channelAverageViews: averageViews,
+                            ratio: averageViews > 0 ? video.viewCount / averageViews : 0,
+                            commentsSummary,
+                        });
+                    }
                 }
                 
-                const videos = await getChannelVideos(channelInfo.channelId, timeframe, apiKey);
-                
-                if (videos.length === 0) continue;
+                if (allTitlesForTrending.length > 0) {
+                    try {
+                        const trends = await analyzeTitleTrends(allTitlesForTrending);
+                        setTrendAnalysis(trends);
+                    } catch (trendError) {
+                        console.error("Trend analysis failed:", trendError);
+                        // Don't block the main results if trend analysis fails
+                    }
+                }
 
-                const totalViews = videos.reduce((sum, video) => sum + video.viewCount, 0);
-                const averageViews = videos.length > 0 ? totalViews / videos.length : 0;
+                setOriginalResults(allTopVideos);
+                success = true;
+                lastError = null;
+                break; // Success, exit the loop
 
-                const potentialVideos = videos
-                    .filter(video => video.viewCount > averageViews * 1.5)
-                    .sort((a, b) => b.viewCount - a.viewCount);
-                
-                const top5Videos = potentialVideos.slice(0, 5);
-
-                for (const video of top5Videos) {
-                    const comments = await getVideoComments(video.id, apiKey);
-                    const commentsSummary = await summarizeComments(comments, geminiApiKey);
-                    
-                    allTopVideos.push({
-                        ...video,
-                        channelId: channelInfo.channelId,
-                        channelName: channelInfo.channelName,
-                        channelAverageViews: averageViews,
-                        ratio: averageViews > 0 ? video.viewCount / averageViews : 0,
-                        commentsSummary,
-                    });
+            } catch (err: any) {
+                lastError = err;
+                const errorMessage = err.message || '';
+                if (errorMessage.includes('quotaExceeded') || errorMessage.includes('dailyLimitExceeded')) {
+                    console.warn(`API key at index ${keyIndex} exhausted. Trying next key.`);
+                    continue; // Quota error, try next key
+                } else {
+                    break; // Different error, stop trying
                 }
             }
-
-            setOriginalResults(allTopVideos);
-
-        } catch (err: any) {
-            console.error(err);
-            setError(`Đã xảy ra lỗi: ${err.message}. Vui lòng kiểm tra API key và thử lại.`);
-        } finally {
-            setIsLoading(false);
         }
-    }, [channelsInput, timeframe, apiKey, geminiApiKey, apiKeysReady, setOriginalResults]);
+
+        if (!success && lastError) {
+            const finalErrorMessage = (lastError.message || '').includes('quota')
+                ? "Tất cả YouTube API keys đã hết hạn ngạch. Vui lòng thử lại sau."
+                : `Đã xảy ra lỗi: ${lastError.message}. Vui lòng kiểm tra lại.`;
+            setError(finalErrorMessage);
+        }
+
+        setIsLoading(false);
+
+    }, [channelsInput, timeframe, keysReady, youtubeApiKeys, currentYoutubeKeyIndex, setCurrentYoutubeKeyIndex, setOriginalResults]);
 
     const displayedResults = useMemo(() => {
         const viewFilter = Number(minViews) || 0;
@@ -174,13 +233,17 @@ https://www.youtube.com/@TheSleepyExplorer-r6o`);
                 setTimeframe={setTimeframe}
                 onAnalyze={handleAnalyze}
                 isLoading={isLoading}
-                apiKeysReady={apiKeysReady}
+                apiKeysReady={keysReady}
             />
+
+            {!isLoading && trendAnalysis && (
+                <TitleTrendAnalysisDisplay analysis={trendAnalysis} />
+            )}
 
             {isLoading && (
                 <div className="mt-12 flex flex-col items-center justify-center">
                     <LoadingSpinner />
-                    <p className="mt-4 text-lg text-indigo-400">Đang phân tích... Quá trình này có thể mất vài phút.</p>
+                    <p className="mt-4 text-lg text-indigo-400">Đang phân tích và nhận diện xu hướng... Quá trình này có thể mất vài phút.</p>
                 </div>
             )}
 
@@ -203,7 +266,7 @@ https://www.youtube.com/@TheSleepyExplorer-r6o`);
             )}
 
             {!isLoading && displayedResults.length > 0 && (
-                <ResultsDisplay results={displayedResults} onSummaryUpdate={updateVideoSummary} geminiApiKey={geminiApiKey} />
+                <ResultsDisplay results={displayedResults} onSummaryUpdate={updateVideoSummary} />
             )}
             
             {!isLoading && originalResults.length > 0 && displayedResults.length === 0 && (

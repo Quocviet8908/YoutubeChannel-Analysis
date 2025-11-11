@@ -9,7 +9,6 @@ interface VideoResultCardProps {
     video: AnalyzedVideo;
     rank: number;
     onSummaryUpdate: (videoId: string, summary: string) => void;
-    geminiApiKey: string;
 }
 
 const RankBadge: React.FC<{ rank: number }> = ({ rank }) => {
@@ -26,13 +25,13 @@ const RankBadge: React.FC<{ rank: number }> = ({ rank }) => {
     );
 };
 
-export const VideoResultCard: React.FC<VideoResultCardProps> = ({ video, rank, onSummaryUpdate, geminiApiKey }) => {
+export const VideoResultCard: React.FC<VideoResultCardProps> = ({ video, rank, onSummaryUpdate }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSummarizing, setIsSummarizing] = useState(false);
 
     const handleSummarize = async (transcript: string) => {
         setIsSummarizing(true);
-        const summary = await summarizeText(transcript, video.title, geminiApiKey);
+        const summary = await summarizeText(transcript, video.title);
         onSummaryUpdate(video.id, summary);
         setIsSummarizing(false);
         setIsModalOpen(false);

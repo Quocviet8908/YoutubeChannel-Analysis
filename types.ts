@@ -31,3 +31,53 @@ export interface ChannelGrowthData {
     currentVideoCount: number;
     previousVideoCount: number;
 }
+
+// New type for Key Validation
+export interface AccessKey {
+  key: string;
+  expirationDate: string;
+}
+
+
+// New types for Script Writer
+export type ScriptLength = number;
+
+export interface AidaPuzzleSection {
+    id: string;
+    title: string;
+    question: string;
+    points: string[];
+    estimatedWordCount: number;
+}
+
+export interface OutlineData {
+    suggestionTitle: string;
+    keyPoints: string[];
+    viralPoints: string[];
+    aidaOutline: AidaPuzzleSection[];
+}
+
+export interface FinalScript {
+    vietnameseScript: string;
+    englishScript: string;
+}
+
+// New type for Title Trend Analysis
+export interface TitleTrendAnalysis {
+  overview: string;
+  trendingTitles: string[];
+}
+
+// New type for detailed video analysis
+export interface DetailedVideoAnalysis {
+  id: string;
+  title: string;
+  description: string;
+  tags: string[];
+  thumbnailUrl: string;
+  allComments: string[];
+  audienceInsight: string;
+  status: 'loading' | 'completed' | 'error';
+  error?: string;
+  commentCount: string | null;
+}

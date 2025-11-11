@@ -5,10 +5,9 @@ import { VideoResultCard } from './VideoResultCard';
 interface ResultsDisplayProps {
     results: AnalyzedVideo[];
     onSummaryUpdate: (videoId: string, summary: string) => void;
-    geminiApiKey: string;
 }
 
-export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onSummaryUpdate, geminiApiKey }) => {
+export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onSummaryUpdate }) => {
     return (
         <div className="mt-12">
             <h2 className="text-3xl font-bold text-center mb-8 text-gray-200">
@@ -21,7 +20,6 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onSumma
                         video={video} 
                         rank={index + 1}
                         onSummaryUpdate={onSummaryUpdate}
-                        geminiApiKey={geminiApiKey}
                     />
                 ))}
             </div>

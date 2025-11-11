@@ -1,72 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
 interface ApiKeyManagerProps {
-    youtubeApiKey: string;
-    geminiApiKey: string;
-    onSave: (youtubeKey: string, geminiKey: string) => void;
+    keysLoading: boolean;
+    keysError: string | null;
+    youtubeKeyCount: number;
+    geminiKeyCount: number;
 }
 
-export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({ youtubeApiKey, geminiApiKey, onSave }) => {
-    const [localYoutubeKey, setLocalYoutubeKey] = useState(youtubeApiKey);
-    const [localGeminiKey, setLocalGeminiKey] = useState(geminiApiKey);
-    const [saved, setSaved] = useState(!!(youtubeApiKey && geminiApiKey));
+export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({ keysLoading, keysError, youtubeKeyCount, geminiKeyCount }) => {
 
-    useEffect(() => {
-        setLocalYoutubeKey(youtubeApiKey);
-        setLocalGeminiKey(geminiApiKey);
-    }, [youtubeApiKey, geminiApiKey]);
-
-    const handleSave = () => {
-        onSave(localYoutubeKey.trim(), localGeminiKey.trim());
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000); // Show saved message for 2 seconds
+    const getStatus = () => {
+        if (keysLoading) {
+            return (
+                <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+                    <span className="text-yellow-300">Đang tải API Keys từ Google Sheet...</span>
+                </div>
+            );
+        }
+        if (keysError) {
+            return (
+                <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span className="text-red-300">{keysError}</span>
+                </div>
+            );
+        }
+        if (youtubeKeyCount > 0 || geminiKeyCount > 0) {
+            return (
+                <div className="flex items-center space-x-2">
+                     <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <span className="text-green-300">
+                        Đã tải thành công: {youtubeKeyCount} YouTube Key(s) & {geminiKeyCount} Gemini Key(s).
+                    </span>
+                </div>
+            );
+        }
+        return null;
     };
-    
-    const keysProvided = youtubeApiKey && geminiApiKey;
-    const keysChanged = localYoutubeKey !== youtubeApiKey || localGeminiKey !== geminiApiKey;
 
     return (
-        <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-2xl shadow-lg border border-gray-700 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                <div className="md:col-span-5">
-                    <label htmlFor="youtube-key" className="block text-sm font-medium text-gray-300 mb-2">
-                        YouTube Data API v3 Key
-                    </label>
-                    <input
-                        id="youtube-key"
-                        type="password"
-                        value={localYoutubeKey}
-                        onChange={(e) => setLocalYoutubeKey(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors placeholder:text-gray-500"
-                        placeholder="Dán YouTube API Key"
-                    />
-                </div>
-                <div className="md:col-span-5">
-                    <label htmlFor="gemini-key" className="block text-sm font-medium text-gray-300 mb-2">
-                        Google Gemini API Key
-                    </label>
-                    <input
-                        id="gemini-key"
-                        type="password"
-                        value={localGeminiKey}
-                        onChange={(e) => setLocalGeminiKey(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors placeholder:text-gray-500"
-                        placeholder="Dán Gemini API Key"
-                    />
-                </div>
-                <div className="md:col-span-2">
-                     <button
-                        onClick={handleSave}
-                        disabled={!localYoutubeKey.trim() || !localGeminiKey.trim() || !keysChanged}
-                        className="w-full h-10 inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500 transition-colors"
-                    >
-                        {saved ? 'Đã lưu!' : (keysProvided && !keysChanged ? 'Đã lưu' : 'Lưu Keys')}
-                    </button>
-                </div>
+        <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-2xl shadow-lg border border-gray-700 mb-6 text-sm">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-2">
+                <div className="font-semibold">{getStatus()}</div>
+                 <p className="text-xs text-gray-500 text-center md:text-right">
+                    API keys được tải tự động từ Google Sheet.
+                </p>
             </div>
-             <p className="text-xs text-gray-500 mt-2 text-center md:text-left">
-                Keys của bạn được lưu trữ an toàn trong bộ nhớ cục bộ của trình duyệt.
-            </p>
         </div>
     );
 };

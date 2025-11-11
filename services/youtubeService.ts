@@ -192,3 +192,76 @@ export const calculateChannelGrowth = async (channelId: string, timeframeDays: n
         previousVideoCount: previousVideos.length
     };
 };
+
+// --- New Functions for Detailed Video Analysis ---
+
+export const extractVideoIdFromUrl = (url: string): string | null => {
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+};
+
+export const getVideoDetails = async (videoId: string, apiKey: string): Promise<{ title: string; description: string; tags: string[]; thumbnailUrl: string; commentCount: string | null; }> => {
+    const params = new URLSearchParams({
+        part: 'snippet,statistics',
+        id: videoId,
+        key: apiKey,
+    });
+    const response = await fetch(`${API_BASE_URL}/videos?${params.toString()}`);
+    const data = await handleApiError(response);
+    if (data.items && data.items.length > 0) {
+        const item = data.items[0];
+        return {
+            title: item.snippet.title,
+            description: item.snippet.description,
+            tags: item.snippet.tags || [],
+            thumbnailUrl: item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url,
+            commentCount: item.statistics?.commentCount || null,
+        };
+    }
+    throw new Error(`Không tìm thấy video với ID: ${videoId}`);
+};
+
+export const getAllVideoComments = async (videoId: string, apiKey:string): Promise<string[]> => {
+    const comments: string[] = [];
+    let nextPageToken: string | undefined = undefined;
+
+    do {
+        const params = new URLSearchParams({
+            part: 'snippet',
+            videoId: videoId,
+            order: 'relevance',
+            textFormat: 'plainText',
+            maxResults: '100',
+            key: apiKey,
+        });
+
+        if (nextPageToken) {
+            params.set('pageToken', nextPageToken);
+        }
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/commentThreads?${params.toString()}`);
+            const data = await handleApiError(response);
+
+            data.items.forEach((item: any) => {
+                comments.push(item.snippet.topLevelComment.snippet.textDisplay);
+            });
+
+            nextPageToken = data.nextPageToken;
+        } catch (error: any) {
+             if (error.message && (error.message.includes('disabled comments') || error.message.includes('comments are disabled'))) {
+                return ["Bình luận đã bị tắt cho video này."];
+            }
+            console.error(`Could not fetch a page of comments for video ${videoId}:`, error);
+            throw error; // Re-throw to be handled by the main logic
+        }
+
+    } while (nextPageToken);
+    
+    if (comments.length === 0) {
+        return ["Không có bình luận nào."];
+    }
+    
+    return comments;
+};

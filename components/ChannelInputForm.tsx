@@ -62,7 +62,7 @@ UC-lHJZR3Gqxm24_Vd_AJ5Yw
                  <button
                     onClick={onAnalyze}
                     disabled={isButtonDisabled}
-                    title={!apiKeysReady ? 'Vui lòng cung cấp và lưu API keys để bắt đầu' : ''}
+                    title={!apiKeysReady ? 'Vui lòng đợi API keys được tải hoặc khắc phục lỗi' : ''}
                     className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-full shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-900/50 disabled:text-gray-400 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500 transition-transform transform hover:scale-105"
                 >
                     {isLoading ? 'Đang xử lý...' : 'Bắt đầu Phân Tích'}

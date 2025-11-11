@@ -2,14 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { ApiKeyManager } from './components/ApiKeyManager';
 import { VideoAnalysisTab } from './components/VideoAnalysisTab';
 import { ChannelGrowthTab } from './components/ChannelGrowthTab';
-import { AnalyzedVideo, ChannelGrowthData } from './types';
+import { ScriptWriterTab } from './components/ScriptWriterTab';
+import { VideoListAnalysisTab } from './components/video-list-analysis/VideoListAnalysisTab';
+import { KeyValidationScreen } from './components/KeyValidationScreen';
+import { AnalyzedVideo, ChannelGrowthData, AccessKey } from './types';
+import { fetchYoutubeApiKeys, fetchGeminiApiKeys, fetchAccessKeys } from './services/googleSheetService';
+import { LoadingSpinner } from './components/LoadingSpinner';
+
+const parseDate = (dateString: string): Date | null => {
+    // Expects DD/MM/YYYY
+    const parts = dateString.split('/');
+    if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+        const year = parseInt(parts[2], 10);
+        const date = new Date(year, month, day);
+        // Check if date is valid
+        if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) {
+            return date;
+        }
+    }
+    return null;
+};
+
 
 const App: React.FC = () => {
-    const [youtubeApiKey, setYoutubeApiKey] = useState<string>(() => localStorage.getItem('youtubeApiKey') || '');
-    const [geminiApiKey, setGeminiApiKey] = useState<string>(() => localStorage.getItem('geminiApiKey') || '');
-    const [activeTab, setActiveTab] = useState<'analysis' | 'growth'>('analysis');
+    const [youtubeApiKeys, setYoutubeApiKeys] = useState<string[]>([]);
+    const [geminiApiKeys, setGeminiApiKeys] = useState<string[]>([]);
+    const [currentYoutubeKeyIndex, setCurrentYoutubeKeyIndex] = useState<number>(0);
+    const [keysLoading, setKeysLoading] = useState<boolean>(true);
+    const [keysError, setKeysError] = useState<string | null>(null);
 
-    // Lifted state for results from both tabs
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+    const [accessKeys, setAccessKeys] = useState<AccessKey[]>([]);
+    const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+    const [activeTab, setActiveTab] = useState<'analysis' | 'growth' | 'script' | 'videoListAnalysis'>('analysis');
+
     const [videoAnalysisResults, setVideoAnalysisResults] = useState<AnalyzedVideo[]>(() => {
         try {
             const saved = localStorage.getItem('videoAnalysisResults');
@@ -28,7 +57,6 @@ const App: React.FC = () => {
         }
     });
 
-    // Effects to persist lifted state to localStorage
     useEffect(() => {
         localStorage.setItem('videoAnalysisResults', JSON.stringify(videoAnalysisResults));
     }, [videoAnalysisResults]);
@@ -39,43 +67,66 @@ const App: React.FC = () => {
 
 
     useEffect(() => {
-        if (youtubeApiKey) {
-            localStorage.setItem('youtubeApiKey', youtubeApiKey);
-        } else {
-            localStorage.removeItem('youtubeApiKey');
-        }
-    }, [youtubeApiKey]);
+        const loadAllKeys = async () => {
+            setKeysLoading(true);
+            setAuthLoading(true);
+            try {
+                const [youtubeKeys, geminiKeys, fetchedAccessKeys] = await Promise.all([
+                    fetchYoutubeApiKeys(),
+                    fetchGeminiApiKeys(),
+                    fetchAccessKeys()
+                ]);
 
-     useEffect(() => {
-        if (geminiApiKey) {
-            localStorage.setItem('geminiApiKey', geminiApiKey);
-        } else {
-            localStorage.removeItem('geminiApiKey');
-        }
-    }, [geminiApiKey]);
+                setAccessKeys(fetchedAccessKeys);
 
-    const handleClearApiKeys = () => {
-        setYoutubeApiKey('');
-        setGeminiApiKey('');
-        setVideoAnalysisResults([]);
-        setChannelGrowthResults([]);
-        localStorage.removeItem('youtubeApiKey');
-        localStorage.removeItem('geminiApiKey');
-        localStorage.removeItem('videoAnalysisResults');
-        localStorage.removeItem('channelGrowthResults');
-        // Reload to ensure all states are reset cleanly
-        window.location.reload();
-    }
+                if (youtubeKeys.length === 0) {
+                    setKeysError("Không tìm thấy YouTube API key nào trong Google Sheet.");
+                } else {
+                    setYoutubeApiKeys(youtubeKeys);
+                    setKeysError(null);
+                }
+                setGeminiApiKeys(geminiKeys);
 
-    const handleApiKeysSave = (youtubeKey: string, geminiKey: string) => {
-        setYoutubeApiKey(youtubeKey);
-        setGeminiApiKey(geminiKey);
+                const savedKey = localStorage.getItem('userAccessKey');
+                if (savedKey) {
+                    const foundKey = fetchedAccessKeys.find(k => k.key === savedKey);
+                    if (foundKey) {
+                        const expirationDate = parseDate(foundKey.expirationDate);
+                        if (expirationDate) {
+                            expirationDate.setHours(23, 59, 59, 999);
+                            if (new Date() <= expirationDate) {
+                                setIsAuthenticated(true);
+                            } else {
+                                localStorage.removeItem('userAccessKey');
+                            }
+                        } else {
+                           localStorage.removeItem('userAccessKey');
+                        }
+                    } else {
+                        localStorage.removeItem('userAccessKey');
+                    }
+                }
+            } catch (err) {
+                const errorMessage = err instanceof Error ? err.message : "Không thể tải API keys hoặc access keys từ Google Sheet. Vui lòng kiểm tra lại.";
+                setKeysError(errorMessage);
+                console.error(err);
+            } finally {
+                setKeysLoading(false);
+                setAuthLoading(false);
+            }
+        };
+        loadAllKeys();
+    }, []);
+
+    const handleSuccessfulLogin = (key: string) => {
+        localStorage.setItem('userAccessKey', key);
+        setIsAuthenticated(true);
     };
-    
-    const TabButton: React.FC<{tabId: 'analysis' | 'growth', children: React.ReactNode}> = ({ tabId, children }) => (
+
+    const TabButton: React.FC<{tabId: 'analysis' | 'growth' | 'script' | 'videoListAnalysis', children: React.ReactNode}> = ({ tabId, children }) => (
         <button
             onClick={() => setActiveTab(tabId)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                 activeTab === tabId
                     ? 'bg-indigo-600 text-white'
                     : 'text-gray-300 hover:bg-gray-700'
@@ -85,6 +136,21 @@ const App: React.FC = () => {
         </button>
     )
 
+    const keysReady = youtubeApiKeys.length > 0 && !keysLoading && !keysError;
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-gray-100">
+                <LoadingSpinner />
+                <p className="mt-4 text-lg text-indigo-400">Đang khởi tạo...</p>
+            </div>
+        )
+    }
+
+    if (!isAuthenticated) {
+        return <KeyValidationScreen onSuccess={handleSuccessfulLogin} accessKeys={accessKeys} isLoading={keysLoading} />;
+    }
+
     return (
         <div className="min-h-screen bg-gray-900 text-gray-100 font-sans p-4 sm:p-6 lg:p-8">
             <div className="max-w-7xl mx-auto">
@@ -93,41 +159,55 @@ const App: React.FC = () => {
                         YouTube Channel Analyzer
                     </h1>
                     <p className="mt-2 text-lg text-gray-400">
-                        Phân tích và tìm ra các video nổi bật nhất từ các kênh bạn theo dõi.
+                        Phân tích, theo dõi tăng trưởng và sáng tạo kịch bản cho kênh YouTube của bạn.
                     </p>
-                    { (youtubeApiKey || geminiApiKey) &&
-                        <button onClick={handleClearApiKeys} className="absolute top-0 right-0 text-sm text-gray-500 hover:text-gray-300 transition-colors">
-                            Xoá API Keys
-                        </button>
-                    }
                 </header>
                 
                 <ApiKeyManager 
-                    youtubeApiKey={youtubeApiKey}
-                    geminiApiKey={geminiApiKey}
-                    onSave={handleApiKeysSave}
+                    keysLoading={keysLoading}
+                    keysError={keysError}
+                    youtubeKeyCount={youtubeApiKeys.length}
+                    geminiKeyCount={geminiApiKeys.length}
                 />
 
-                <div className="mt-8 mb-6 flex justify-center space-x-2 bg-gray-800/50 p-1 rounded-lg max-w-sm mx-auto">
-                    <TabButton tabId="analysis">Phân Tích Video</TabButton>
+                <div className="mt-8 mb-6 flex justify-center flex-wrap gap-2 bg-gray-800/50 p-1 rounded-lg max-w-xl mx-auto">
+                    <TabButton tabId="analysis">Phân Tích Kênh</TabButton>
                     <TabButton tabId="growth">Tăng Trưởng Kênh</TabButton>
+                    <TabButton tabId="videoListAnalysis">Phân Tích Videos</TabButton>
+                    <TabButton tabId="script">Viết Kịch Bản AI</TabButton>
                 </div>
 
                 <main>
                     {activeTab === 'analysis' && (
                         <VideoAnalysisTab 
-                            apiKey={youtubeApiKey} 
-                            geminiApiKey={geminiApiKey}
+                            youtubeApiKeys={youtubeApiKeys}
+                            currentYoutubeKeyIndex={currentYoutubeKeyIndex}
+                            setCurrentYoutubeKeyIndex={setCurrentYoutubeKeyIndex}
+                            keysReady={keysReady}
                             results={videoAnalysisResults}
                             setResults={setVideoAnalysisResults}
                         />
                     )}
                     {activeTab === 'growth' && (
                         <ChannelGrowthTab 
-                            apiKey={youtubeApiKey}
+                            youtubeApiKeys={youtubeApiKeys}
+                            currentYoutubeKeyIndex={currentYoutubeKeyIndex}
+                            setCurrentYoutubeKeyIndex={setCurrentYoutubeKeyIndex}
+                            keysReady={keysReady}
                             results={channelGrowthResults}
                             setResults={setChannelGrowthResults}
                         />
+                    )}
+                    {activeTab === 'videoListAnalysis' && (
+                        <VideoListAnalysisTab
+                             youtubeApiKeys={youtubeApiKeys}
+                            currentYoutubeKeyIndex={currentYoutubeKeyIndex}
+                            setCurrentYoutubeKeyIndex={setCurrentYoutubeKeyIndex}
+                            keysReady={keysReady}
+                        />
+                    )}
+                    {activeTab === 'script' && (
+                        <ScriptWriterTab />
                     )}
                 </main>
             </div>
